@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VCode Collaborative - Write Code Together</title>
+    <!-- Google Fonts Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- 1. LANDING PAGE SCREEN -->
+    <div id="landing-screen" class="landing-container">
+        <div class="landing-card">
+            <div class="landing-header">
+                <span class="landing-logo-icon">⚡</span>
+                <h1>VCode Collaborative</h1>
+                <p>Real-time group coding, chat, and video calls in your browser.</p>
+            </div>
+            
+            <div class="landing-form">
+                <div class="form-group">
+                    <label for="username-input">Your Display Name</label>
+                    <input type="text" id="username-input" placeholder="e.g. Alice" autocomplete="off" maxlength="15">
+                </div>
+
+                <div class="form-divider">Join an Existing Room</div>
+                
+                <div class="form-group">
+                    <label for="room-code-input">Room Code</label>
+                    <input type="text" id="room-code-input" placeholder="e.g. AB12XY" autocomplete="off" style="text-transform: uppercase;">
+                </div>
+                
+                <button id="join-room-btn" class="btn btn-primary btn-block">
+                    Join Room
+                </button>
+                
+                <div class="form-divider">Or Start Fresh</div>
+                
+                <button id="create-room-btn" class="btn btn-secondary btn-block">
+                    Create New Room
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. COLLABORATIVE WORKSPACE SCREEN -->
+    <div id="workspace-screen" class="app-container hidden">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="app-logo">
+                    <span class="logo-icon">⚡</span>
+                    <span class="logo-text">VCode</span>
+                </div>
+                <div class="room-code-badge">
+                    <span id="display-room-code">------</span>
+                    <button id="copy-code-btn" class="icon-btn" title="Copy Room Code">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sidebar Navigation Tabs -->
+            <div class="sidebar-tabs">
+                <button id="tab-chat-btn" class="tab-btn active" data-tab="tab-chat">
+                    <span>Chat</span>
+                    <span id="chat-badge" class="badge hidden">0</span>
+                </button>
+                <button id="tab-video-btn" class="tab-btn" data-tab="tab-video">
+                    <span>Video</span>
+                </button>
+                <button id="tab-people-btn" class="tab-btn" data-tab="tab-people">
+                    <span>People</span>
+                    <span id="people-count" class="badge">0</span>
+                </button>
+            </div>
+
+            <!-- Sidebar Content Panels -->
+            <div class="sidebar-content">
+                <!-- Panel A: Chat -->
+                <div id="tab-chat" class="tab-panel active">
+                    <div id="chat-messages" class="chat-messages-container">
+                        <!-- Messages populated dynamically -->
+                    </div>
+                    <div class="chat-input-bar">
+                        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                        <button id="send-chat-btn" class="btn btn-primary icon-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Panel B: Video Streams Grid -->
+                <div id="tab-video" class="tab-panel">
+                    <div class="video-controls-header">
+                        <button id="join-call-btn" class="btn btn-primary btn-block">Join Video Call</button>
+                        <div id="call-actions" class="call-actions-row hidden">
+                            <button id="toggle-audio-btn" class="icon-btn active" title="Mute/Unmute Mic">🎤</button>
+                            <button id="toggle-video-btn" class="icon-btn active" title="Start/Stop Video">📷</button>
+                            <button id="leave-call-btn" class="icon-btn danger" title="Leave Video Call">❌</button>
+                        </div>
+                    </div>
+                    <div id="video-grid" class="video-grid">
+                        <!-- Video elements generated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Panel C: Participants List -->
+                <div id="tab-people" class="tab-panel">
+                    <div id="people-list" class="people-list-container">
+                        <!-- User list elements populated dynamically -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="sidebar-footer">
+                <button id="leave-room-btn" class="btn btn-danger btn-block">
+                    Leave Room
+                </button>
+            </div>
+        </aside>
+        
+        <main class="main-content">
+            <header class="editor-header">
+                <div class="editor-title-row">
+                    <span class="file-icon">📄</span>
+                    <span id="current-file-name">shared_workspace</span>
+                    <span id="collaboration-status" class="status-badge">Disconnected</span>
+                </div>
+                
+                <div class="header-actions">
+                    <select id="language-selector" class="select-dropdown">
+                        <option value="javascript">JavaScript</option>
+                        <option value="typescript">TypeScript</option>
+                        <option value="html">HTML</option>
+                        <option value="css">CSS</option>
+                        <option value="json">JSON</option>
+                        <option value="python">Python</option>
+                        <option value="java">Java</option>
+                        <option value="cpp">C++</option>
+                        <option value="markdown">Markdown</option>
+                        <option value="plaintext">Plain Text</option>
+                    </select>
+
+                    <button id="upload-file-btn" class="btn btn-secondary" title="Upload local file to editor">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        Upload
+                    </button>
+                    <input type="file" id="file-uploader" class="hidden" accept=".txt,.js,.ts,.html,.css,.json,.py,.java,.cpp,.md">
+
+                    <button id="download-file-btn" class="btn btn-primary" title="Download current code">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Download
+                    </button>
+                </div>
+            </header>
+            
+            <div id="editor-container"></div>
+        </main>
+    </div>
+</body>
+</html>
