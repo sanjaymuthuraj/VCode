@@ -1,0 +1,513 @@
+import React, { useState, useEffect, useRef } from 'react';
+import LandingScreen from './components/LandingScreen';
+import WorkspaceScreen from './components/WorkspaceScreen';
+
+// Backend APIs
+const isHttps = window.location.protocol === 'https:';
+const apiBase = `${isHttps ? 'https:' : 'http:'}//localhost:8080/api/rooms`;
+const wsBase = `${isHttps ? 'wss:' : 'ws:'}//localhost:8080/ws/room`;
+
+export default function App() {
+    const [screen, setScreen] = useState('landing'); // 'landing' | 'workspace'
+    const [username, setUsername] = useState('');
+    const [roomCode, setRoomCode] = useState('');
+    const [connectionStatus, setConnectionStatus] = useState('Disconnected');
+    const [participants, setParticipants] = useState([]);
+    const [chatMessages, setChatMessages] = useState([]);
+    const [unreadChatCount, setUnreadChatCount] = useState(0);
+    const [language, setLanguage] = useState('javascript');
+    const [mySessionId, setMySessionId] = useState(null);
+
+    // WebRTC video call states
+    const [isInCall, setIsInCall] = useState(false);
+    const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+    const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+    const [videoStreams, setVideoStreams] = useState([]); // [{ id, displayName, stream, isMuted }]
+
+    // Connection & element references to prevent stale closures
+    const socketRef = useRef(null);
+    const peersRef = useRef({}); // sessionId -> RTCPeerConnection
+    const editorComponentRef = useRef(null);
+
+    const mySessionIdRef = useRef(null);
+    const participantsRef = useRef([]);
+    const localStreamRef = useRef(null);
+    const isInCallRef = useRef(false);
+    const usernameRef = useRef('');
+    const roomCodeRef = useRef('');
+
+    // Sync state values to refs
+    useEffect(() => { mySessionIdRef.current = mySessionId; }, [mySessionId]);
+    useEffect(() => { participantsRef.current = participants; }, [participants]);
+    useEffect(() => { isInCallRef.current = isInCall; }, [isInCall]);
+    useEffect(() => { usernameRef.current = username; }, [username]);
+    useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
+
+    // WebSocket send helper
+    const sendMessage = (data) => {
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify(data));
+        }
+    };
+
+    // Clean up peer connections on unmount
+    useEffect(() => {
+        return () => {
+            stopLocalCall();
+            if (socketRef.current) {
+                socketRef.current.close();
+            }
+        };
+    }, []);
+
+    // WebSocket Message Parser
+    const handleSocketMessage = (msg) => {
+        switch (msg.type) {
+            case 'ROOM_STATE':
+                setMySessionId(msg.yourSessionId);
+                editorComponentRef.current?.setValue(msg.code);
+                setLanguage(msg.language);
+                updateParticipantsList(msg.participants, msg.yourSessionId);
+                break;
+                
+            case 'USER_LIST_UPDATE':
+                updateParticipantsList(msg.participants, mySessionIdRef.current);
+                break;
+                
+            case 'CHAT':
+                setChatMessages(prev => [...prev, {
+                    senderId: msg.senderId,
+                    sender: msg.sender,
+                    message: msg.message,
+                    mySessionId: mySessionIdRef.current
+                }]);
+                break;
+                
+            case 'CODE_UPDATE':
+                editorComponentRef.current?.setValue(msg.code);
+                break;
+                
+            case 'LANGUAGE_UPDATE':
+                setLanguage(msg.language);
+                break;
+                
+            case 'CURSOR_UPDATE':
+                editorComponentRef.current?.updateRemoteCursor(msg.sessionId, msg.username, msg.position);
+                break;
+                
+            case 'RTC_SIGNAL':
+                handleRtcSignalPayload(msg.senderId, msg.senderName, msg.signal);
+                break;
+        }
+    };
+
+    const updateParticipantsList = (newList, currentMySessionId) => {
+        const formatted = newList.map(p => ({
+            sessionId: p.sessionId,
+            username: p.username,
+            isSelf: p.sessionId === currentMySessionId
+        }));
+
+        // Clean up decorations for disconnected users
+        const oldSessionIds = participantsRef.current.map(p => p.sessionId);
+        const newSessionIds = newList.map(p => p.sessionId);
+        oldSessionIds.forEach(sid => {
+            if (!newSessionIds.includes(sid)) {
+                editorComponentRef.current?.clearRemoteCursor(sid);
+            }
+        });
+
+        setParticipants(formatted);
+    };
+
+    // Establish WebSocket Connection
+    const enterRoom = (name, code) => {
+        setUsername(name);
+        setRoomCode(code);
+        setScreen('workspace');
+        setConnectionStatus('Connecting');
+
+        const socket = new WebSocket(wsBase);
+        socketRef.current = socket;
+
+        socket.onopen = () => {
+            setConnectionStatus('Connected');
+            sendMessage({
+                type: 'JOIN',
+                roomCode: code,
+                username: name
+            });
+        };
+
+        socket.onclose = () => {
+            setConnectionStatus('Disconnected');
+            stopLocalCall();
+            editorComponentRef.current?.clearAllRemoteCursors();
+        };
+
+        socket.onerror = (err) => {
+            console.error("Socket error", err);
+        };
+
+        socket.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            handleSocketMessage(msg);
+        };
+    };
+
+    // Join and Create Lobby Handlers
+    const handleJoinRoom = async (name, code) => {
+        try {
+            const res = await fetch(`${apiBase}/${code}`);
+            const data = await res.json();
+            if (data.exists) {
+                enterRoom(name, code);
+            } else {
+                alert("Room not found. Please check the code and try again.");
+            }
+        } catch (e) {
+            alert("Failed to connect to room registry: " + e.message);
+        }
+    };
+
+    const handleCreateRoom = async (name) => {
+        try {
+            const res = await fetch(apiBase, { method: 'POST' });
+            const data = await res.json();
+            enterRoom(name, data.roomCode);
+        } catch (e) {
+            alert("Failed to create room. Is the backend server running? " + e.message);
+        }
+    };
+
+    const handleLeaveRoom = () => {
+        if (window.confirm("Are you sure you want to leave the collaborative session?")) {
+            stopLocalCall();
+            if (socketRef.current) {
+                socketRef.current.close();
+                socketRef.current = null;
+            }
+            setScreen('landing');
+            setUsername('');
+            setRoomCode('');
+            setParticipants([]);
+            setChatMessages([]);
+            setUnreadChatCount(0);
+            setMySessionId(null);
+        }
+    };
+
+    // Editor sync callbacks
+    const handleCodeChange = (val) => {
+        sendMessage({
+            type: 'CODE_UPDATE',
+            code: val
+        });
+    };
+
+    const handleCursorChange = (pos) => {
+        sendMessage({
+            type: 'CURSOR_UPDATE',
+            position: {
+                lineNumber: pos.lineNumber,
+                column: pos.column
+            }
+        });
+    };
+
+    const handleLanguageChange = (lang) => {
+        setLanguage(lang);
+        sendMessage({
+            type: 'LANGUAGE_UPDATE',
+            language: lang
+        });
+    };
+
+    const handleUploadFile = (text, lang) => {
+        editorComponentRef.current?.setValue(text);
+        setLanguage(lang);
+        sendMessage({
+            type: 'LANGUAGE_UPDATE',
+            language: lang
+        });
+        sendMessage({
+            type: 'CODE_UPDATE',
+            code: text
+        });
+    };
+
+    const handleDownloadFile = () => {
+        const codeText = editorComponentRef.current?.getValue() || '';
+        let ext = 'txt';
+        if (language === 'javascript') ext = 'js';
+        else if (language === 'typescript') ext = 'ts';
+        else if (language === 'html') ext = 'html';
+        else if (language === 'css') ext = 'css';
+        else if (language === 'json') ext = 'json';
+        else if (language === 'python') ext = 'py';
+        else if (language === 'java') ext = 'java';
+        else if (language === 'cpp') ext = 'cpp';
+        else if (language === 'markdown') ext = 'md';
+        
+        const filename = `code_room_${roomCode}.${ext}`;
+        const blob = new Blob([codeText], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    // ----------------------------------------------------
+    // Full Mesh WebRTC Video Call Integration
+    // ----------------------------------------------------
+    const startLocalCall = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localStreamRef.current = stream;
+            setIsInCall(true);
+            setIsAudioEnabled(true);
+            setIsVideoEnabled(true);
+
+            // Add local stream to view state
+            setVideoStreams(prev => [
+                ...prev.filter(v => v.id !== 'local'),
+                {
+                    id: 'local',
+                    displayName: `${usernameRef.current} (You)`,
+                    stream: stream,
+                    isMuted: true
+                }
+            ]);
+
+            // Notify other participants we joined the call
+            participantsRef.current.forEach(p => {
+                if (p.sessionId !== mySessionIdRef.current) {
+                    sendMessage({
+                        type: 'RTC_SIGNAL',
+                        target: p.sessionId,
+                        signal: { type: 'ready' }
+                    });
+                }
+            });
+        } catch (e) {
+            alert("Failed to acquire camera/microphone: " + e.message);
+        }
+    };
+
+    const stopLocalCall = () => {
+        setIsInCall(false);
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => track.stop());
+            localStreamRef.current = null;
+        }
+
+        setVideoStreams([]);
+
+        // Close peer connections
+        Object.keys(peersRef.current).forEach(id => {
+            closePeerConnection(id);
+        });
+
+        // Notify others we left
+        participantsRef.current.forEach(p => {
+            if (p.sessionId !== mySessionIdRef.current) {
+                sendMessage({
+                    type: 'RTC_SIGNAL',
+                    target: p.sessionId,
+                    signal: { type: 'leave' }
+                });
+            }
+        });
+    };
+
+    const toggleAudio = () => {
+        if (localStreamRef.current) {
+            const audioTrack = localStreamRef.current.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                setIsAudioEnabled(audioTrack.enabled);
+            }
+        }
+    };
+
+    const toggleVideo = () => {
+        if (localStreamRef.current) {
+            const videoTrack = localStreamRef.current.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                setIsVideoEnabled(videoTrack.enabled);
+            }
+        }
+    };
+
+    const handleRtcSignalPayload = (senderId, senderName, signal) => {
+        if (!isInCallRef.current) return;
+        
+        if (signal.type === 'ready') {
+            if (mySessionIdRef.current > senderId) {
+                initiatePeerConnection(senderId, senderName);
+            }
+        } else if (signal.type === 'offer') {
+            respondToOffer(senderId, senderName, signal.sdp);
+        } else if (signal.type === 'answer') {
+            const pc = peersRef.current[senderId];
+            if (pc) {
+                pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+            }
+        } else if (signal.type === 'candidate') {
+            const pc = peersRef.current[senderId];
+            if (pc && signal.candidate) {
+                pc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(e => {
+                    console.error("Error adding Ice Candidate", e);
+                });
+            }
+        } else if (signal.type === 'leave') {
+            closePeerConnection(senderId);
+        }
+    };
+
+    const initiatePeerConnection = async (targetId, targetName) => {
+        if (peersRef.current[targetId]) return;
+        
+        const pc = createBasePeerConnection(targetId, targetName);
+        peersRef.current[targetId] = pc;
+        
+        try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            sendMessage({
+                type: 'RTC_SIGNAL',
+                target: targetId,
+                signal: { type: 'offer', sdp: offer.sdp }
+            });
+        } catch (e) {
+            console.error("Failed to create offer for peer: " + targetId, e);
+        }
+    };
+
+    const respondToOffer = async (senderId, senderName, remoteSdp) => {
+        if (peersRef.current[senderId]) {
+            closePeerConnection(senderId);
+        }
+        
+        const pc = createBasePeerConnection(senderId, senderName);
+        peersRef.current[senderId] = pc;
+        
+        try {
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            sendMessage({
+                type: 'RTC_SIGNAL',
+                target: senderId,
+                signal: { type: 'answer', sdp: answer.sdp }
+            });
+        } catch (e) {
+            console.error("Failed to respond to offer from: " + senderId, e);
+        }
+    };
+
+    const createBasePeerConnection = (peerId, peerName) => {
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        });
+        
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => {
+                pc.addTrack(track, localStreamRef.current);
+            });
+        }
+        
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendMessage({
+                    type: 'RTC_SIGNAL',
+                    target: peerId,
+                    signal: {
+                        type: 'candidate',
+                        candidate: event.candidate
+                    }
+                });
+            }
+        };
+        
+        pc.ontrack = (event) => {
+            const remoteStream = event.streams[0];
+            setVideoStreams(prev => {
+                const filtered = prev.filter(v => v.id !== peerId);
+                return [...filtered, {
+                    id: peerId,
+                    displayName: peerName,
+                    stream: remoteStream,
+                    isMuted: false
+                }];
+            });
+        };
+        
+        pc.onconnectionstatechange = () => {
+            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                closePeerConnection(peerId);
+            }
+        };
+        
+        return pc;
+    };
+
+    const closePeerConnection = (peerId) => {
+        const pc = peersRef.current[peerId];
+        if (pc) {
+            pc.close();
+            delete peersRef.current[peerId];
+        }
+        setVideoStreams(prev => prev.filter(v => v.id !== peerId));
+    };
+
+    return (
+        <div style={{ height: '100%' }}>
+            {screen === 'landing' ? (
+                <LandingScreen 
+                    onJoinRoom={handleJoinRoom} 
+                    onCreateRoom={handleCreateRoom} 
+                />
+            ) : (
+                <WorkspaceScreen 
+                    roomCode={roomCode}
+                    username={username}
+                    connectionStatus={connectionStatus}
+                    participants={participants}
+                    chatMessages={chatMessages}
+                    unreadChatCount={unreadChatCount}
+                    setUnreadChatCount={setUnreadChatCount}
+                    language={language}
+                    onLanguageChange={handleLanguageChange}
+                    onUploadFile={handleUploadFile}
+                    onDownloadFile={handleDownloadFile}
+                    onLeaveRoom={handleLeaveRoom}
+                    onSendChatMessage={handleSendChatMessage}
+                    
+                    editorComponentRef={editorComponentRef}
+                    onCodeChange={handleCodeChange}
+                    onCursorChange={handleCursorChange}
+
+                    isInCall={isInCall}
+                    isAudioEnabled={isAudioEnabled}
+                    isVideoEnabled={isVideoEnabled}
+                    onJoinVideoCall={startLocalCall}
+                    onLeaveVideoCall={stopLocalCall}
+                    onToggleAudio={toggleAudio}
+                    onToggleVideo={toggleVideo}
+                    videoStreams={videoStreams}
+                />
+            )}
+        </div>
+    );
+}

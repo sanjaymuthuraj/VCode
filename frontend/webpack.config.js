@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 export default {
   mode: 'development',
   entry: {
-    'renderer': './renderer.js',
+    'renderer': './renderer.jsx',
     'editor.worker': 'monaco-editor/esm/vs/editor/editor.worker.js',
     'json.worker': 'monaco-editor/esm/vs/language/json/json.worker',
     'css.worker': 'monaco-editor/esm/vs/language/css/css.worker',
@@ -21,8 +21,21 @@ export default {
     path: path.resolve(__dirname, 'dist'),
     clean: true,
   },
+  resolve: {
+    extensions: ['.js', '.jsx'],
+  },
   module: {
     rules: [
+      {
+        test: /\.jsx?$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-env', '@babel/preset-react'],
+          },
+        },
+      },
       { test: /\.css$/, use: ['style-loader', 'css-loader'] },
       { test: /\.ttf$/, type: 'asset/resource' },
     ],
