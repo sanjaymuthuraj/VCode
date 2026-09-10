@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import EditorWorkspace from './EditorWorkspace';
 import TerminalWorkspace from './TerminalWorkspace';
+import { getTerminalWsUrl } from '../config';
+
 
 // Subcomponent to display video frame reactively
 function VideoFrame({ id, displayName, stream, isMuted }) {
@@ -73,8 +75,8 @@ export default function WorkspaceScreen({
     const fileInputRef = useRef(null);
     const terminalComponentRef = useRef(null);
 
-    const isHttps = window.location.protocol === 'https:';
-    const terminalWsUrl = `${isHttps ? 'wss:' : 'ws:'}//localhost:8080/ws/terminal?roomCode=${roomCode}`;
+    const terminalWsUrl = getTerminalWsUrl(roomCode);
+
 
     // Scroll chat messages to bottom on new messages
     useEffect(() => {

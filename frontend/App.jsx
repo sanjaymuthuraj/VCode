@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import LandingScreen from './components/LandingScreen';
 import WorkspaceScreen from './components/WorkspaceScreen';
+import { API_BASE as apiBase, WS_ROOM_URL as wsBase } from './config';
 
-// Backend APIs
-const isHttps = window.location.protocol === 'https:';
-const apiBase = `${isHttps ? 'https:' : 'http:'}//localhost:8080/api/rooms`;
-const wsBase = `${isHttps ? 'wss:' : 'ws:'}//localhost:8080/ws/room`;
 
 export default function App() {
     const [screen, setScreen] = useState('landing'); // 'landing' | 'workspace'

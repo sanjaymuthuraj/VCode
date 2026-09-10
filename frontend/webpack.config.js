@@ -1,5 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import webpack from 'webpack';
 import HtmlWebpackPlugin from 'html-webpack-plugin';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,5 +48,8 @@ export default {
       template: './index.html',
       filename: 'index.html',
     }),
+    new webpack.DefinePlugin({
+      'process.env.BACKEND_URL': JSON.stringify(process.env.BACKEND_URL || ''),
+    }),
   ],
-};
+};
