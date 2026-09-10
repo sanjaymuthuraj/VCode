@@ -17,7 +17,9 @@ export default {
   },
   output: {
     globalObject: 'self',
-    filename: '[name].bundle.js',
+    filename: (pathData) => {
+      return pathData.chunk.name === 'renderer' ? '[name].[contenthash].bundle.js' : '[name].bundle.js';
+    },
     path: path.resolve(__dirname, 'dist'),
     clean: true,
   },

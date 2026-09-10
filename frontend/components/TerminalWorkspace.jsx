@@ -29,47 +29,67 @@ const TerminalWorkspace = forwardRef(({ wsUrl }, ref) => {
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
         
-        term.open(terminalRef.current);
-        fitAddon.fit();
+        // Delay open and fit to ensure React has fully mounted and layout is calculated
+        setTimeout(() => {
+            if (terminalRef.current) {
+                term.open(terminalRef.current);
+                try {
+                    if (terminalRef.current.clientWidth > 0) {
+                        fitAddon.fit();
+                    }
+                } catch (e) {}
+            }
+        }, 50);
         
         xtermRef.current = term;
         fitAddonRef.current = fitAddon;
 
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
+        let ws;
+        const connectTimeout = setTimeout(() => {
+            ws = new WebSocket(wsUrl);
+            wsRef.current = ws;
 
-        ws.onopen = () => {
-            term.writeln('\x1b[32m--- Terminal Connected ---\x1b[0m');
+            ws.onopen = () => {
+                term.writeln('\x1b[32m--- Terminal Connected ---\x1b[0m');
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    term.write(event.data);
+                } else {
+                    event.data.text().then(text => term.write(text));
+                }
+            };
+
+            ws.onclose = () => {
+                term.writeln('\x1b[31m--- Terminal Disconnected ---\x1b[0m');
+            };
+
+            term.onData(data => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(data);
+                }
+            });
+        }, 100);
+
+        const handleResize = () => {
+            try {
+                if (terminalRef.current && terminalRef.current.clientWidth > 0) {
+                    fitAddon.fit();
+                }
+            } catch (e) {}
         };
-
-        ws.onmessage = (event) => {
-            if (typeof event.data === 'string') {
-                term.write(event.data);
-            } else {
-                // If it's a blob, convert to string
-                event.data.text().then(text => term.write(text));
-            }
-        };
-
-        ws.onclose = () => {
-            term.writeln('\x1b[31m--- Terminal Disconnected ---\x1b[0m');
-        };
-
-        term.onData(data => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(data);
-            }
-        });
-
-        const handleResize = () => fitAddon.fit();
         window.addEventListener('resize', handleResize);
 
         // Also fit after a short delay in case container sizing finishes late
-        setTimeout(() => fitAddon.fit(), 100);
+        setTimeout(handleResize, 100);
 
         return () => {
+            clearTimeout(connectTimeout);
             window.removeEventListener('resize', handleResize);
-            ws.close();
+            if (ws) {
+                ws.close();
+            }
             term.dispose();
         };
     }, [wsUrl]);

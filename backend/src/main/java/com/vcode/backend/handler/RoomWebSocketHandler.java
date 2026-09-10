@@ -37,9 +37,10 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        Map<String, Object> msgData = objectMapper.readValue(payload, HashMap.class);
+        Map<String, Object> msgData = objectMapper.readValue(payload, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
 
         String type = (String) msgData.get("type");
         if (type == null) return;
@@ -193,6 +194,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         broadcastToRoom(roomCode, updateMsg, null);
     }
 
+    @SuppressWarnings("unchecked")
     private void handleCursorUpdate(WebSocketSession session, Map<String, Object> msgData) throws IOException {
         String roomCode = sessionToRoomCode.get(session.getId());
         if (roomCode == null) return;
