@@ -30,7 +30,7 @@ const TerminalWorkspace = forwardRef(({ wsUrl }, ref) => {
         term.loadAddon(fitAddon);
         
         // Delay open and fit to ensure React has fully mounted and layout is calculated
-        setTimeout(() => {
+        const openTimeout = setTimeout(() => {
             if (terminalRef.current) {
                 term.open(terminalRef.current);
                 try {
@@ -82,10 +82,12 @@ const TerminalWorkspace = forwardRef(({ wsUrl }, ref) => {
         window.addEventListener('resize', handleResize);
 
         // Also fit after a short delay in case container sizing finishes late
-        setTimeout(handleResize, 100);
+        const resizeTimeout = setTimeout(handleResize, 100);
 
         return () => {
             clearTimeout(connectTimeout);
+            clearTimeout(openTimeout);
+            clearTimeout(resizeTimeout);
             window.removeEventListener('resize', handleResize);
             if (ws) {
                 ws.close();

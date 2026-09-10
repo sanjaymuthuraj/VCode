@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
+import java.security.SecureRandom;
 
 @RestController
 @RequestMapping("/api/rooms")
@@ -15,7 +15,7 @@ import java.util.Random;
 public class RoomController {
 
     private final RoomWebSocketHandler webSocketHandler;
-    private final Random random = new Random();
+    private final SecureRandom random = new SecureRandom();
 
     public RoomController(RoomWebSocketHandler webSocketHandler) {
         this.webSocketHandler = webSocketHandler;

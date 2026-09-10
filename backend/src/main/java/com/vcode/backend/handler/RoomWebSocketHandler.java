@@ -17,9 +17,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 @Component
 public class RoomWebSocketHandler extends TextWebSocketHandler {
+
+    private static final Pattern ROOM_CODE_PATTERN = Pattern.compile("[A-Z0-9]{6}");
+    private static final Pattern FILE_NAME_PATTERN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._ -]{0,127}");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
@@ -42,7 +46,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         String payload = message.getPayload();
         Map<String, Object> msgData = objectMapper.readValue(payload, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
 
-        String type = (String) msgData.get("type");
+        String type = stringValue(msgData.get("type"));
         if (type == null) return;
 
         switch (type) {
@@ -82,15 +86,20 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleJoin(WebSocketSession session, Map<String, Object> msgData) throws IOException {
-        String roomCode = (String) msgData.get("roomCode");
-        String username = (String) msgData.get("username");
+        String roomCode = stringValue(msgData.get("roomCode"));
+        String username = stringValue(msgData.get("username"));
 
         if (roomCode == null || username == null) return;
 
         // Clean room code to be case insensitive and trimmed
         roomCode = roomCode.trim().toUpperCase();
+        username = username.trim();
+        if (!ROOM_CODE_PATTERN.matcher(roomCode).matches() || username.isEmpty() || username.length() > 15) return;
 
-        sessionToRoomCode.put(session.getId(), roomCode);
+        String previousRoomCode = sessionToRoomCode.put(session.getId(), roomCode);
+        if (previousRoomCode != null && !previousRoomCode.equals(roomCode)) {
+            removeParticipant(session.getId(), previousRoomCode);
+        }
 
         // Retrieve or create room
         Room room = rooms.computeIfAbsent(roomCode, Room::new);
@@ -134,7 +143,8 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room.Participant p = room.getParticipants().get(session.getId());
         if (p == null) return;
 
-        String chatText = (String) msgData.get("message");
+        String chatText = stringValue(msgData.get("message"));
+        if (chatText == null || chatText.isBlank() || chatText.length() > 4_000) return;
 
         Map<String, Object> chatMsg = new HashMap<>();
         chatMsg.put("type", "CHAT");
@@ -152,8 +162,9 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
 
-        String filename = (String) msgData.get("filename");
-        String code = (String) msgData.get("code");
+        String filename = stringValue(msgData.get("filename"));
+        String code = stringValue(msgData.get("code"));
+        if (!isValidFileName(filename) || code == null || code.length() > 1_000_000) return;
         
         Room.FileInfo file = room.getFiles().get(filename);
         if (file != null) {
@@ -178,8 +189,9 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
 
-        String filename = (String) msgData.get("filename");
-        String language = (String) msgData.get("language");
+        String filename = stringValue(msgData.get("filename"));
+        String language = stringValue(msgData.get("language"));
+        if (!isValidFileName(filename) || language == null || language.length() > 32) return;
         
         Room.FileInfo file = room.getFiles().get(filename);
         if (file != null) {
@@ -208,9 +220,12 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Map<String, Object> posMap = (Map<String, Object>) msgData.get("position");
         if (posMap == null) return;
 
+        Number lineNumber = (Number) posMap.get("lineNumber");
+        Number column = (Number) posMap.get("column");
+        if (lineNumber == null || column == null || lineNumber.intValue() < 1 || column.intValue() < 1) return;
         Room.CursorPosition pos = new Room.CursorPosition();
-        pos.setLineNumber((Integer) posMap.get("lineNumber"));
-        pos.setColumn((Integer) posMap.get("column"));
+        pos.setLineNumber(lineNumber.intValue());
+        pos.setColumn(column.intValue());
         p.setCursorPosition(pos);
 
         Map<String, Object> cursorMsg = new HashMap<>();
@@ -232,7 +247,8 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room.Participant p = room.getParticipants().get(session.getId());
         if (p == null) return;
         
-        String filename = (String) msgData.get("filename");
+        String filename = stringValue(msgData.get("filename"));
+        if (!isValidFileName(filename) || !room.getFiles().containsKey(filename)) return;
         p.setActiveFile(filename);
         broadcastUserList(roomCode);
     }
@@ -243,11 +259,12 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
         
-        String filename = (String) msgData.get("filename");
-        String content = (String) msgData.get("content");
+        String filename = stringValue(msgData.get("filename"));
+        String content = stringValue(msgData.get("content"));
         if (content == null) content = "";
-        String language = (String) msgData.get("language");
+        String language = stringValue(msgData.get("language"));
         if (language == null) language = "plaintext";
+        if (!isValidFileName(filename) || content.length() > 1_000_000 || language.length() > 32) return;
         
         room.getFiles().putIfAbsent(filename, new Room.FileInfo(content, language));
         syncToDisk(roomCode, filename, content);
@@ -265,9 +282,10 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
         
-        String filename = (String) msgData.get("filename");
-        if ("main.js".equals(filename)) return; // Don't delete root file
-        room.getFiles().remove(filename);
+        String filename = stringValue(msgData.get("filename"));
+        if (!isValidFileName(filename) || "main.js".equals(filename)) return; // Don't delete root file
+        if (room.getFiles().remove(filename) == null) return;
+        deleteFromDisk(roomCode, filename);
         
         Map<String, Object> msg = new HashMap<>();
         msg.put("type", "FILE_DELETE");
@@ -281,13 +299,15 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
         
-        String oldName = (String) msgData.get("oldName");
-        String newName = (String) msgData.get("newName");
-        if ("main.js".equals(oldName)) return; // Don't rename root file
+        String oldName = stringValue(msgData.get("oldName"));
+        String newName = stringValue(msgData.get("newName"));
+        if (!isValidFileName(oldName) || !isValidFileName(newName) || "main.js".equals(oldName)
+                || room.getFiles().containsKey(newName)) return; // Don't rename root file or overwrite a file
         
         Room.FileInfo file = room.getFiles().remove(oldName);
         if (file != null) {
             room.getFiles().put(newName, file);
+            moveOnDisk(roomCode, oldName, newName);
             Map<String, Object> msg = new HashMap<>();
             msg.put("type", "FILE_RENAME");
             msg.put("oldName", oldName);
@@ -307,6 +327,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
 
             Room room = rooms.get(roomCode);
             if (room == null) return;
+            if (!room.getParticipants().containsKey(targetSessionId)) return;
 
             Room.Participant sender = room.getParticipants().get(session.getId());
             String senderName = (sender != null) ? sender.getUsername() : "Unknown";
@@ -366,10 +387,45 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         try {
             Path roomDir = Paths.get(System.getProperty("java.io.tmpdir"), "vcode_rooms", roomCode);
             Files.createDirectories(roomDir);
-            Files.writeString(roomDir.resolve(filename), content != null ? content : "");
+            Files.writeString(roomDir.resolve(filename).normalize(), content != null ? content : "");
         } catch (IOException e) {
             System.err.println("Failed to sync file to disk: " + e.getMessage());
         }
+    }
+
+    private void deleteFromDisk(String roomCode, String filename) {
+        try {
+            Files.deleteIfExists(Paths.get(System.getProperty("java.io.tmpdir"), "vcode_rooms", roomCode, filename));
+        } catch (IOException e) {
+            System.err.println("Failed to delete file from disk: " + e.getMessage());
+        }
+    }
+
+    private void moveOnDisk(String roomCode, String oldName, String newName) {
+        try {
+            Path roomDir = Paths.get(System.getProperty("java.io.tmpdir"), "vcode_rooms", roomCode);
+            Path source = roomDir.resolve(oldName);
+            if (Files.exists(source)) Files.move(source, roomDir.resolve(newName));
+        } catch (IOException e) {
+            System.err.println("Failed to rename file on disk: " + e.getMessage());
+        }
+    }
+
+    private boolean isValidFileName(String filename) {
+        return filename != null && !filename.equals(".") && !filename.equals("..")
+                && FILE_NAME_PATTERN.matcher(filename).matches();
+    }
+
+    private String stringValue(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
+    private void removeParticipant(String sessionId, String roomCode) throws IOException {
+        Room room = rooms.get(roomCode);
+        if (room == null) return;
+        room.getParticipants().remove(sessionId);
+        if (room.getParticipants().isEmpty()) rooms.remove(roomCode, room);
+        else broadcastUserList(roomCode);
     }
 
     private void broadcastUserList(String roomCode) throws IOException {

@@ -87,6 +87,9 @@ export default function App() {
                     message: msg.message,
                     mySessionId: mySessionIdRef.current
                 }]);
+                if (msg.senderId !== mySessionIdRef.current && msg.senderId !== 'system') {
+                    setUnreadChatCount(prev => prev + 1);
+                }
                 break;
                 
             case 'CODE_UPDATE':
@@ -200,8 +203,12 @@ export default function App() {
         };
 
         socket.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            handleSocketMessage(msg);
+            try {
+                const msg = JSON.parse(event.data);
+                handleSocketMessage(msg);
+            } catch (error) {
+                console.error('Received an invalid server message', error);
+            }
         };
     };
 

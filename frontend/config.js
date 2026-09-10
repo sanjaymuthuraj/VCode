@@ -7,4 +7,4 @@ const wsProto = isHttps ? 'wss:' : 'ws:';
 
 export const API_BASE = `${httpProto}//${cleanHost}/api/rooms`;
 export const WS_ROOM_URL = `${wsProto}//${cleanHost}/ws/room`;
-export const getTerminalWsUrl = (roomCode) => `${wsProto}//${cleanHost}/ws/terminal?roomCode=${roomCode}`;
+export const getTerminalWsUrl = (roomCode) => `${wsProto}//${cleanHost}/ws/terminal?roomCode=${encodeURIComponent(roomCode)}`;

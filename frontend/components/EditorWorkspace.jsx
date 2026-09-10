@@ -54,12 +54,15 @@ const EditorWorkspace = forwardRef(({ onCodeChange, onCursorChange, language, se
                 editorModelRef.current.deltaDecorations(remoteCursorsRef.current[senderId], []);
             }
             
-            if (!position) return;
+            if (!position || !Number.isInteger(position.lineNumber) || !Number.isInteger(position.column)
+                || position.lineNumber < 1 || position.column < 1) return;
             
             // Add new decorations
+            const lineNumber = Math.min(position.lineNumber, editorModelRef.current.getLineCount());
+            const column = Math.min(position.column, editorModelRef.current.getLineMaxColumn(lineNumber));
             remoteCursorsRef.current[senderId] = editorModelRef.current.deltaDecorations([], [
                 {
-                    range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                    range: new monaco.Range(lineNumber, column, lineNumber, column),
                     options: {
                         className: 'remote-cursor-element',
                         hoverMessage: { value: senderName },

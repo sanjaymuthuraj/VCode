@@ -27,6 +27,9 @@ function VideoFrame({ id, displayName, stream, isMuted }) {
     );
 }
 
+const isValidFileName = (name) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name)
+    && name !== '.' && name !== '..';
+
 export default function WorkspaceScreen({
     roomCode,
     username,
@@ -77,6 +80,9 @@ export default function WorkspaceScreen({
 
     const terminalWsUrl = getTerminalWsUrl(roomCode);
 
+    useEffect(() => {
+        editorComponentRef.current?.setValue(files[activeFile]?.content || '');
+    }, [activeFile, files, editorComponentRef]);
 
     // Scroll chat messages to bottom on new messages
     useEffect(() => {
@@ -301,7 +307,9 @@ export default function WorkspaceScreen({
                                 <span style={{fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-secondary)'}}>EXPLORER</span>
                                 <button className="icon-btn" style={{width: '24px', height: '24px'}} onClick={() => {
                                     const name = prompt("Enter new file name (e.g. script.js):");
-                                    if (name && !files[name]) {
+                                    if (name && !isValidFileName(name)) {
+                                        alert('Use a file name up to 128 characters without path separators.');
+                                    } else if (name && !files[name]) {
                                         let lang = 'plaintext';
                                         if (name.endsWith('.js')) lang = 'javascript';
                                         else if (name.endsWith('.ts')) lang = 'typescript';
@@ -330,12 +338,23 @@ export default function WorkspaceScreen({
                                         <span className="person-name" style={{whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden'}}>{filename}</span>
                                     </div>
                                     {filename !== 'main.js' && (
-                                        <button className="icon-btn danger" style={{width: '20px', height: '20px', padding: 0, flexShrink: 0}} onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (window.confirm(`Delete ${filename}?`)) {
-                                                onFileDelete(filename);
-                                            }
-                                        }}>×</button>
+                                        <div style={{display: 'flex', gap: '4px'}}>
+                                            <button className="icon-btn" title={`Rename ${filename}`} style={{width: '20px', height: '20px', padding: 0, flexShrink: 0}} onClick={(e) => {
+                                                e.stopPropagation();
+                                                const newName = prompt('Enter a new file name:', filename)?.trim();
+                                                if (newName && !isValidFileName(newName)) {
+                                                    alert('Use a file name up to 128 characters without path separators.');
+                                                } else if (newName && newName !== filename) {
+                                                    onFileRename(filename, newName);
+                                                }
+                                            }}>✎</button>
+                                            <button className="icon-btn danger" title={`Delete ${filename}`} style={{width: '20px', height: '20px', padding: 0, flexShrink: 0}} onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (window.confirm(`Delete ${filename}?`)) {
+                                                    onFileDelete(filename);
+                                                }
+                                            }}>×</button>
+                                        </div>
                                     )}
                                 </div>
                             ))}
