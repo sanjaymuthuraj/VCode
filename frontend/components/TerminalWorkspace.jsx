@@ -1,104 +1,109 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 
-const TerminalWorkspace = forwardRef(({ wsUrl }, ref) => {
+const TerminalWorkspace = forwardRef(({ wsUrl, onStatusChange }, ref) => {
     const terminalRef = useRef(null);
-    const wsRef = useRef(null);
     const xtermRef = useRef(null);
-    const fitAddonRef = useRef(null);
+    const wsRef = useRef(null);
+    const pendingInputRef = useRef([]);
+    const [connectionId, setConnectionId] = useState(0);
 
     useImperativeHandle(ref, () => ({
-        write: (data) => {
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(data);
+        write(data) {
+            const socket = wsRef.current;
+            if (socket?.readyState === WebSocket.OPEN) {
+                socket.send(data);
+            } else {
+                pendingInputRef.current.push(data);
             }
+        },
+        reconnect() {
+            setConnectionId(value => value + 1);
+        },
+        clear() {
+            xtermRef.current?.clear();
         }
-    }));
+    }), []);
 
     useEffect(() => {
         if (!terminalRef.current) return;
 
+        let disposed = false;
         const term = new Terminal({
-            theme: { background: '#0b0c10', foreground: '#f3f4f6' },
+            theme: { background: '#0b0c10', foreground: '#f3f4f6', cursor: '#a5b4fc' },
             fontFamily: "'JetBrains Mono', Consolas, monospace",
             fontSize: 14,
-            cursorBlink: true
+            cursorBlink: true,
+            scrollback: 5_000
         });
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
-        
-        // Delay open and fit to ensure React has fully mounted and layout is calculated
-        const openTimeout = setTimeout(() => {
-            if (terminalRef.current) {
-                term.open(terminalRef.current);
-                try {
-                    if (terminalRef.current.clientWidth > 0) {
-                        fitAddon.fit();
-                    }
-                } catch (e) {}
-            }
-        }, 50);
-        
+        term.open(terminalRef.current);
         xtermRef.current = term;
-        fitAddonRef.current = fitAddon;
 
-        let ws;
-        const connectTimeout = setTimeout(() => {
-            ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
-
-            ws.onopen = () => {
-                term.writeln('\x1b[32m--- Terminal Connected ---\x1b[0m');
-            };
-
-            ws.onmessage = (event) => {
-                if (typeof event.data === 'string') {
-                    term.write(event.data);
-                } else {
-                    event.data.text().then(text => term.write(text));
-                }
-            };
-
-            ws.onclose = () => {
-                term.writeln('\x1b[31m--- Terminal Disconnected ---\x1b[0m');
-            };
-
-            term.onData(data => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(data);
-                }
-            });
-        }, 100);
-
-        const handleResize = () => {
-            try {
-                if (terminalRef.current && terminalRef.current.clientWidth > 0) {
-                    fitAddon.fit();
-                }
-            } catch (e) {}
+        const fit = () => {
+            if (!disposed && terminalRef.current?.clientWidth > 0 && terminalRef.current?.clientHeight > 0) {
+                try { fitAddon.fit(); } catch { /* hidden panels can report incomplete dimensions */ }
+            }
         };
-        window.addEventListener('resize', handleResize);
+        const resizeObserver = new ResizeObserver(fit);
+        resizeObserver.observe(terminalRef.current);
+        const initialFit = setTimeout(fit, 0);
 
-        // Also fit after a short delay in case container sizing finishes late
-        const resizeTimeout = setTimeout(handleResize, 100);
+        const sendOrQueue = (data) => {
+            const socket = wsRef.current;
+            if (socket?.readyState === WebSocket.OPEN) socket.send(data);
+            else pendingInputRef.current.push(data);
+        };
+        const inputListener = term.onData(sendOrQueue);
+
+        onStatusChange?.('Connecting');
+        let socket;
+        try {
+            socket = new WebSocket(wsUrl);
+            wsRef.current = socket;
+        } catch {
+            term.writeln('\x1b[31mUnable to create a terminal connection.\x1b[0m');
+            onStatusChange?.('Disconnected');
+        }
+
+        if (socket) {
+            socket.onopen = () => {
+                if (disposed) return;
+                onStatusChange?.('Connected');
+                term.writeln('\x1b[32m● Connected\x1b[0m  Type a command and press Enter.');
+                const queuedInput = pendingInputRef.current.splice(0);
+                queuedInput.forEach(data => socket.send(data));
+                term.focus();
+            };
+            socket.onmessage = async (event) => {
+                if (disposed) return;
+                term.write(typeof event.data === 'string' ? event.data : await event.data.text());
+            };
+            socket.onerror = () => onStatusChange?.('Disconnected');
+            socket.onclose = () => {
+                if (!disposed) {
+                    onStatusChange?.('Disconnected');
+                    term.writeln('\r\n\x1b[31m● Disconnected. Use reconnect to start a new shell.\x1b[0m');
+                }
+            };
+        }
 
         return () => {
-            clearTimeout(connectTimeout);
-            clearTimeout(openTimeout);
-            clearTimeout(resizeTimeout);
-            window.removeEventListener('resize', handleResize);
-            if (ws) {
-                ws.close();
-            }
+            disposed = true;
+            clearTimeout(initialFit);
+            resizeObserver.disconnect();
+            inputListener.dispose();
+            if (wsRef.current === socket) wsRef.current = null;
+            socket?.close();
+            if (xtermRef.current === term) xtermRef.current = null;
             term.dispose();
         };
-    }, [wsUrl]);
+    }, [wsUrl, connectionId, onStatusChange]);
 
-    return (
-        <div ref={terminalRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}></div>
-    );
+    return <div ref={terminalRef} className="terminal-workspace" />;
 });
 
 export default TerminalWorkspace;

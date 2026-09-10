@@ -74,6 +74,7 @@ export default function WorkspaceScreen({
         minimap: false
     });
     const [isTerminalVisible, setIsTerminalVisible] = useState(true);
+    const [terminalStatus, setTerminalStatus] = useState('Connecting');
     const chatMessagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
     const terminalComponentRef = useRef(null);
@@ -490,12 +491,20 @@ export default function WorkspaceScreen({
                 
                 {isTerminalVisible && (
                     <div style={{height: '250px', borderTop: '1px solid var(--border-color)', backgroundColor: '#0b0c10', display: 'flex', flexDirection: 'column'}}>
-                        <div style={{padding: '4px 12px', fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-header)', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                            <span>TERMINAL</span>
-                            <button className="icon-btn" style={{width: '20px', height: '20px', padding: 0}} onClick={() => setIsTerminalVisible(false)}>×</button>
+                        <div className="terminal-toolbar">
+                            <div className="terminal-title">
+                                <span className={`terminal-status ${terminalStatus.toLowerCase()}`}></span>
+                                <span>TERMINAL</span>
+                                <span className="terminal-status-text">{terminalStatus}</span>
+                            </div>
+                            <div className="terminal-actions">
+                                <button className="icon-btn" title="Clear terminal" onClick={() => terminalComponentRef.current?.clear()}>⌫</button>
+                                <button className="icon-btn" title="Reconnect terminal" onClick={() => terminalComponentRef.current?.reconnect()}>↻</button>
+                                <button className="icon-btn" title="Hide terminal" onClick={() => setIsTerminalVisible(false)}>×</button>
+                            </div>
                         </div>
                         <div style={{flex: 1, padding: '4px'}}>
-                            <TerminalWorkspace ref={terminalComponentRef} wsUrl={terminalWsUrl} />
+                            <TerminalWorkspace ref={terminalComponentRef} wsUrl={terminalWsUrl} onStatusChange={setTerminalStatus} />
                         </div>
                     </div>
                 )}
