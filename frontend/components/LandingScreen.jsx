@@ -51,30 +51,45 @@ export default function LandingScreen({ onJoinRoom, onCreateRoom }) {
                         />
                     </div>
 
-                    <div className="form-divider">Join an Existing Room</div>
-                    
-                    <div className="form-group">
-                        <label htmlFor="room-code-input">Room Code</label>
-                        <input 
-                            type="text" 
-                            id="room-code-input" 
-                            placeholder="e.g. AB12XY" 
-                            autoComplete="off" 
-                            style={{ textTransform: 'uppercase' }}
-                            value={code}
-                            onChange={(e) => setCode(e.target.value)}
-                        />
+                    <div className="room-actions">
+                        <section className="room-action-box join-room-box">
+                            <div className="room-action-heading">
+                                <span aria-hidden="true">↗</span>
+                                <div>
+                                    <h2>Join a Room</h2>
+                                    <p>Enter a code from a teammate.</p>
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label htmlFor="room-code-input">Room Code</label>
+                                <input
+                                    type="text"
+                                    id="room-code-input"
+                                    placeholder="e.g. AB12XY"
+                                    autoComplete="off"
+                                    style={{ textTransform: 'uppercase' }}
+                                    value={code}
+                                    onChange={(e) => setCode(e.target.value)}
+                                />
+                            </div>
+                            <button id="join-room-btn" className="btn btn-primary btn-block" onClick={handleJoin}>
+                                Join Room
+                            </button>
+                        </section>
+
+                        <section className="room-action-box create-room-box">
+                            <div className="room-action-heading">
+                                <span aria-hidden="true">+</span>
+                                <div>
+                                    <h2>Create a Room</h2>
+                                    <p>Start a new space and invite your team.</p>
+                                </div>
+                            </div>
+                            <button id="create-room-btn" className="btn btn-secondary btn-block" onClick={handleCreate}>
+                                Create New Room
+                            </button>
+                        </section>
                     </div>
-                    
-                    <button id="join-room-btn" className="btn btn-primary btn-block" onClick={handleJoin}>
-                        Join Room
-                    </button>
-                    
-                    <div className="form-divider">Or Start Fresh</div>
-                    
-                    <button id="create-room-btn" className="btn btn-secondary btn-block" onClick={handleCreate}>
-                        Create New Room
-                    </button>
                 </div>
             </div>
         </div>
