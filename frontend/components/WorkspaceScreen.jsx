@@ -81,6 +81,38 @@ export default function WorkspaceScreen({
 
     const terminalWsUrl = getTerminalWsUrl(roomCode);
 
+    const runActiveFile = () => {
+        setIsTerminalVisible(true);
+        const filename = activeFile.replace(/"/g, '');
+        const extension = filename.split('.').pop()?.toLowerCase();
+        let command = '';
+        if (extension === 'js') command = `node "${filename}"\r`;
+        else if (extension === 'ts') command = `npx ts-node "${filename}"\r`;
+        else if (extension === 'py') command = `python "${filename}"\r`;
+        else if (extension === 'java') command = `javac "${filename}" && java "${filename.replace(/\.java$/i, '')}"\r`;
+        else if (extension === 'cpp' || extension === 'cc') command = `g++ "${filename}" -o vcode-program && vcode-program\r`;
+        else command = `echo "No runner is configured for ${filename}"\r`;
+
+        setTimeout(() => terminalComponentRef.current?.write(command), 0);
+    };
+
+    useEffect(() => {
+        const handleShortcut = (event) => {
+            if (event.ctrlKey && event.key.toLowerCase() === 's') {
+                event.preventDefault();
+                onDownloadFile();
+            } else if (event.ctrlKey && event.key === 'Enter') {
+                event.preventDefault();
+                runActiveFile();
+            } else if (event.ctrlKey && event.key === '`') {
+                event.preventDefault();
+                setIsTerminalVisible(visible => !visible);
+            }
+        };
+        window.addEventListener('keydown', handleShortcut);
+        return () => window.removeEventListener('keydown', handleShortcut);
+    }, [activeFile, files, onDownloadFile]);
+
     useEffect(() => {
         editorComponentRef.current?.setValue(files[activeFile]?.content || '');
     }, [activeFile, files, editorComponentRef]);
@@ -381,23 +413,7 @@ export default function WorkspaceScreen({
                     </div>
                     
                     <div className="header-actions">
-                        <button className="btn btn-primary" style={{marginRight: '8px', padding: '4px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px'}} title="Run Code in Terminal" onClick={() => {
-                            setIsTerminalVisible(true);
-                            // Brief delay if it just got toggled on
-                            setTimeout(() => {
-                                if (terminalComponentRef.current) {
-                                    let cmd = '';
-                                    const ext = activeFile.split('.').pop();
-                                    if (ext === 'js') cmd = `node ${activeFile}\r\n`;
-                                    else if (ext === 'py') cmd = `python ${activeFile}\r\n`;
-                                    else if (ext === 'java') cmd = `javac ${activeFile} && java ${activeFile.split('.')[0]}\r\n`;
-                                    else if (ext === 'cpp') cmd = `g++ ${activeFile} -o a.out && ./a.out\r\n`;
-                                    else cmd = `echo "Cannot run ${activeFile}"\r\n`;
-                                    
-                                    terminalComponentRef.current.write(cmd);
-                                }
-                            }, 100);
-                        }}>
+                        <button className="btn btn-primary" style={{marginRight: '8px', padding: '4px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px'}} title="Run active file (Ctrl+Enter)" onClick={runActiveFile}>
                             ▶ Run
                         </button>
                         <button className="btn btn-secondary icon-btn" title="Toggle Terminal" onClick={() => setIsTerminalVisible(!isTerminalVisible)}>

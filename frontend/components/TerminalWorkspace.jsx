@@ -58,6 +58,26 @@ const TerminalWorkspace = forwardRef(({ wsUrl, onStatusChange }, ref) => {
             else pendingInputRef.current.push(data);
         };
         const inputListener = term.onData(sendOrQueue);
+        term.attachCustomKeyEventHandler((event) => {
+            if (event.type !== 'keydown') return true;
+
+            if (event.ctrlKey && event.shiftKey && event.code === 'KeyC') {
+                const selection = term.getSelection();
+                if (selection) navigator.clipboard?.writeText(selection).catch(() => {});
+                return false;
+            }
+            if (event.ctrlKey && event.shiftKey && event.code === 'KeyV') {
+                navigator.clipboard?.readText().then(text => {
+                    if (text) sendOrQueue(text.replace(/\r?\n/g, '\r'));
+                }).catch(() => {});
+                return false;
+            }
+            if (event.ctrlKey && event.code === 'KeyL') {
+                term.clear();
+                return false;
+            }
+            return true;
+        });
 
         onStatusChange?.('Connecting');
         let socket;
@@ -73,7 +93,7 @@ const TerminalWorkspace = forwardRef(({ wsUrl, onStatusChange }, ref) => {
             socket.onopen = () => {
                 if (disposed) return;
                 onStatusChange?.('Connected');
-                term.writeln('\x1b[32m● Connected\x1b[0m  Type a command and press Enter.');
+                term.writeln('\x1b[32m● Connected\x1b[0m  Type a command and press Enter.  \x1b[90mCtrl+L clear · Ctrl+Shift+C/V copy/paste\x1b[0m');
                 const queuedInput = pendingInputRef.current.splice(0);
                 queuedInput.forEach(data => socket.send(data));
                 term.focus();
