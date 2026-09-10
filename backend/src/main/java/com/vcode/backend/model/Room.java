@@ -5,32 +5,20 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Room {
     private String roomCode;
-    private String codeContent = "// Start typing collaborative code here...\n";
-    private String language = "javascript";
+    private Map<String, FileInfo> files = new ConcurrentHashMap<>();
     private Map<String, Participant> participants = new ConcurrentHashMap<>();
 
     public Room(String roomCode) {
         this.roomCode = roomCode;
+        this.files.put("main.js", new FileInfo("// Start typing collaborative code here...\n", "javascript"));
     }
 
     public String getRoomCode() {
         return roomCode;
     }
 
-    public String getCodeContent() {
-        return codeContent;
-    }
-
-    public void setCodeContent(String codeContent) {
-        this.codeContent = codeContent;
-    }
-
-    public String getLanguage() {
-        return language;
-    }
-
-    public void setLanguage(String language) {
-        this.language = language;
+    public Map<String, FileInfo> getFiles() {
+        return files;
     }
 
     public Map<String, Participant> getParticipants() {
@@ -40,6 +28,7 @@ public class Room {
     public static class Participant {
         private String sessionId;
         private String username;
+        private String activeFile = "main.js";
         private CursorPosition cursorPosition;
 
         public Participant(String sessionId, String username) {
@@ -53,6 +42,14 @@ public class Room {
 
         public String getUsername() {
             return username;
+        }
+
+        public String getActiveFile() {
+            return activeFile;
+        }
+
+        public void setActiveFile(String activeFile) {
+            this.activeFile = activeFile;
         }
 
         public CursorPosition getCursorPosition() {
@@ -82,6 +79,34 @@ public class Room {
 
         public void setColumn(int column) {
             this.column = column;
+        }
+    }
+
+    public static class FileInfo {
+        private String content;
+        private String language;
+
+        public FileInfo() {}
+
+        public FileInfo(String content, String language) {
+            this.content = content;
+            this.language = language;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public void setContent(String content) {
+            this.content = content;
+        }
+
+        public String getLanguage() {
+            return language;
+        }
+
+        public void setLanguage(String language) {
+            this.language = language;
         }
     }
 }

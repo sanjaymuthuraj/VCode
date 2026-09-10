@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import EditorWorkspace from './EditorWorkspace';
+import TerminalWorkspace from './TerminalWorkspace';
 
 // Subcomponent to display video frame reactively
 function VideoFrame({ id, displayName, stream, isMuted }) {
@@ -32,7 +33,12 @@ export default function WorkspaceScreen({
     chatMessages,
     unreadChatCount,
     setUnreadChatCount,
-    language,
+    files,
+    activeFile,
+    onActiveFileChange,
+    onFileCreate,
+    onFileDelete,
+    onFileRename,
     onLanguageChange,
     onUploadFile,
     onDownloadFile,
@@ -56,8 +62,19 @@ export default function WorkspaceScreen({
 }) {
     const [activeTab, setActiveTab] = useState('tab-chat');
     const [chatInput, setChatInput] = useState('');
+    const [showSettings, setShowSettings] = useState(false);
+    const [editorSettings, setEditorSettings] = useState({
+        theme: 'vs-dark',
+        wordWrap: 'off',
+        minimap: false
+    });
+    const [isTerminalVisible, setIsTerminalVisible] = useState(true);
     const chatMessagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
+    const terminalComponentRef = useRef(null);
+
+    const isHttps = window.location.protocol === 'https:';
+    const terminalWsUrl = `${isHttps ? 'wss:' : 'ws:'}//localhost:8080/ws/terminal?roomCode=${roomCode}`;
 
     // Scroll chat messages to bottom on new messages
     useEffect(() => {
@@ -149,6 +166,12 @@ export default function WorkspaceScreen({
 
                 {/* Sidebar Navigation Tabs */}
                 <div className="sidebar-tabs">
+                    <button 
+                        className={`tab-btn ${activeTab === 'tab-files' ? 'active' : ''}`}
+                        onClick={() => handleTabChange('tab-files')}
+                    >
+                        <span>Files</span>
+                    </button>
                     <button 
                         className={`tab-btn ${activeTab === 'tab-chat' ? 'active' : ''}`}
                         onClick={() => handleTabChange('tab-chat')}
@@ -260,7 +283,58 @@ export default function WorkspaceScreen({
                             {participants.map(p => (
                                 <div key={p.sessionId} className={`person-item ${p.isSelf ? 'self' : ''}`}>
                                     <span className="status-dot"></span>
-                                    <span className="person-name">{p.username}</span>
+                                    <div style={{display: 'flex', flexDirection: 'column'}}>
+                                        <span className="person-name">{p.username}</span>
+                                        <span style={{fontSize: '0.65rem', color: 'var(--text-muted)'}}>{p.activeFile || 'main.js'}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Panel D: Files Explorer */}
+                    <div className={`tab-panel ${activeTab === 'tab-files' ? 'active' : ''}`}>
+                        <div className="people-list-container" style={{gap: '4px'}}>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 8px'}}>
+                                <span style={{fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-secondary)'}}>EXPLORER</span>
+                                <button className="icon-btn" style={{width: '24px', height: '24px'}} onClick={() => {
+                                    const name = prompt("Enter new file name (e.g. script.js):");
+                                    if (name && !files[name]) {
+                                        let lang = 'plaintext';
+                                        if (name.endsWith('.js')) lang = 'javascript';
+                                        else if (name.endsWith('.ts')) lang = 'typescript';
+                                        else if (name.endsWith('.py')) lang = 'python';
+                                        else if (name.endsWith('.html')) lang = 'html';
+                                        else if (name.endsWith('.css')) lang = 'css';
+                                        else if (name.endsWith('.json')) lang = 'json';
+                                        else if (name.endsWith('.java')) lang = 'java';
+                                        else if (name.endsWith('.cpp')) lang = 'cpp';
+                                        else if (name.endsWith('.md')) lang = 'markdown';
+                                        onFileCreate(name, lang);
+                                        onActiveFileChange(name);
+                                    } else if (files[name]) {
+                                        alert("File already exists!");
+                                    }
+                                }}>+</button>
+                            </div>
+                            {Object.keys(files).sort().map(filename => (
+                                <div key={filename} 
+                                    className={`person-item ${activeFile === filename ? 'self' : ''}`}
+                                    style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}
+                                    onClick={() => onActiveFileChange(filename)}
+                                >
+                                    <div style={{display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden'}}>
+                                        <span style={{color: 'var(--text-muted)'}}>📄</span>
+                                        <span className="person-name" style={{whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden'}}>{filename}</span>
+                                    </div>
+                                    {filename !== 'main.js' && (
+                                        <button className="icon-btn danger" style={{width: '20px', height: '20px', padding: 0, flexShrink: 0}} onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (window.confirm(`Delete ${filename}?`)) {
+                                                onFileDelete(filename);
+                                            }
+                                        }}>×</button>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -278,16 +352,38 @@ export default function WorkspaceScreen({
                 <header className="editor-header">
                     <div className="editor-title-row">
                         <span className="file-icon">📄</span>
-                        <span id="current-file-name">shared_workspace</span>
+                        <span id="current-file-name">{activeFile}</span>
                         <span className={`status-badge ${connectionStatus.toLowerCase()}`}>
                             {connectionStatus}
                         </span>
                     </div>
                     
                     <div className="header-actions">
+                        <button className="btn btn-primary" style={{marginRight: '8px', padding: '4px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px'}} title="Run Code in Terminal" onClick={() => {
+                            setIsTerminalVisible(true);
+                            // Brief delay if it just got toggled on
+                            setTimeout(() => {
+                                if (terminalComponentRef.current) {
+                                    let cmd = '';
+                                    const ext = activeFile.split('.').pop();
+                                    if (ext === 'js') cmd = `node ${activeFile}\r\n`;
+                                    else if (ext === 'py') cmd = `python ${activeFile}\r\n`;
+                                    else if (ext === 'java') cmd = `javac ${activeFile} && java ${activeFile.split('.')[0]}\r\n`;
+                                    else if (ext === 'cpp') cmd = `g++ ${activeFile} -o a.out && ./a.out\r\n`;
+                                    else cmd = `echo "Cannot run ${activeFile}"\r\n`;
+                                    
+                                    terminalComponentRef.current.write(cmd);
+                                }
+                            }, 100);
+                        }}>
+                            ▶ Run
+                        </button>
+                        <button className="btn btn-secondary icon-btn" title="Toggle Terminal" onClick={() => setIsTerminalVisible(!isTerminalVisible)}>
+                            {isTerminalVisible ? '🖥️' : '⌨️'}
+                        </button>
                         <select 
                             className="select-dropdown" 
-                            value={language}
+                            value={files[activeFile]?.language || 'plaintext'}
                             onChange={(e) => onLanguageChange(e.target.value)}
                         >
                             <option value="javascript">JavaScript</option>
@@ -301,6 +397,38 @@ export default function WorkspaceScreen({
                             <option value="markdown">Markdown</option>
                             <option value="plaintext">Plain Text</option>
                         </select>
+
+                        <div className="settings-dropdown-container" style={{position: 'relative', display: 'inline-block'}}>
+                            <button className="btn btn-secondary icon-btn" title="Editor Settings" onClick={() => setShowSettings(!showSettings)}>
+                                ⚙️
+                            </button>
+                            {showSettings && (
+                                <div className="settings-menu" style={{
+                                    position: 'absolute', top: '100%', right: 0, marginTop: '8px',
+                                    background: 'var(--bg-card)', border: '1px solid var(--border-color)', 
+                                    padding: '12px', borderRadius: '8px', zIndex: 100, 
+                                    minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '12px',
+                                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)'
+                                }}>
+                                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                        <label style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Theme</label>
+                                        <select className="select-dropdown" style={{padding: '4px 8px'}} value={editorSettings.theme} onChange={(e) => setEditorSettings({...editorSettings, theme: e.target.value})}>
+                                            <option value="vs-dark">Dark</option>
+                                            <option value="vs">Light</option>
+                                            <option value="hc-black">High Contrast</option>
+                                        </select>
+                                    </div>
+                                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                        <label style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Word Wrap</label>
+                                        <input type="checkbox" checked={editorSettings.wordWrap === 'on'} onChange={(e) => setEditorSettings({...editorSettings, wordWrap: e.target.checked ? 'on' : 'off'})} />
+                                    </div>
+                                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                        <label style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>Minimap</label>
+                                        <input type="checkbox" checked={editorSettings.minimap} onChange={(e) => setEditorSettings({...editorSettings, minimap: e.target.checked})} />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
 
                         <button className="btn btn-secondary" title="Upload local file to editor" onClick={handleUploadClick}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -329,12 +457,27 @@ export default function WorkspaceScreen({
                     </div>
                 </header>
                 
-                <EditorWorkspace 
-                    ref={editorComponentRef}
-                    language={language}
-                    onCodeChange={onCodeChange}
-                    onCursorChange={onCursorChange}
-                />
+                <div style={{ flex: 1, position: 'relative' }}>
+                    <EditorWorkspace 
+                        ref={editorComponentRef}
+                        language={files[activeFile]?.language || 'plaintext'}
+                        settings={editorSettings}
+                        onCodeChange={onCodeChange}
+                        onCursorChange={onCursorChange}
+                    />
+                </div>
+                
+                {isTerminalVisible && (
+                    <div style={{height: '250px', borderTop: '1px solid var(--border-color)', backgroundColor: '#0b0c10', display: 'flex', flexDirection: 'column'}}>
+                        <div style={{padding: '4px 12px', fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-header)', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                            <span>TERMINAL</span>
+                            <button className="icon-btn" style={{width: '20px', height: '20px', padding: 0}} onClick={() => setIsTerminalVisible(false)}>×</button>
+                        </div>
+                        <div style={{flex: 1, padding: '4px'}}>
+                            <TerminalWorkspace ref={terminalComponentRef} wsUrl={terminalWsUrl} />
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
     );

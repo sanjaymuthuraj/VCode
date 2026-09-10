@@ -15,7 +15,8 @@ export default function App() {
     const [participants, setParticipants] = useState([]);
     const [chatMessages, setChatMessages] = useState([]);
     const [unreadChatCount, setUnreadChatCount] = useState(0);
-    const [language, setLanguage] = useState('javascript');
+    const [files, setFiles] = useState({});
+    const [activeFile, setActiveFile] = useState('main.js');
     const [mySessionId, setMySessionId] = useState(null);
 
     // WebRTC video call states
@@ -36,12 +37,17 @@ export default function App() {
     const usernameRef = useRef('');
     const roomCodeRef = useRef('');
 
+    const filesRef = useRef({});
+    const activeFileRef = useRef('main.js');
+
     // Sync state values to refs
     useEffect(() => { mySessionIdRef.current = mySessionId; }, [mySessionId]);
     useEffect(() => { participantsRef.current = participants; }, [participants]);
     useEffect(() => { isInCallRef.current = isInCall; }, [isInCall]);
     useEffect(() => { usernameRef.current = username; }, [username]);
     useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
+    useEffect(() => { filesRef.current = files; }, [files]);
+    useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
 
     // WebSocket send helper
     const sendMessage = (data) => {
@@ -65,8 +71,11 @@ export default function App() {
         switch (msg.type) {
             case 'ROOM_STATE':
                 setMySessionId(msg.yourSessionId);
-                editorComponentRef.current?.setValue(msg.code);
-                setLanguage(msg.language);
+                setFiles(msg.files || {});
+                setActiveFile('main.js');
+                if (msg.files && msg.files['main.js']) {
+                    editorComponentRef.current?.setValue(msg.files['main.js'].content);
+                }
                 updateParticipantsList(msg.participants, msg.yourSessionId);
                 break;
                 
@@ -84,15 +93,58 @@ export default function App() {
                 break;
                 
             case 'CODE_UPDATE':
-                editorComponentRef.current?.setValue(msg.code);
+                setFiles(prev => ({
+                    ...prev,
+                    [msg.filename]: { ...prev[msg.filename], content: msg.code }
+                }));
+                if (msg.filename === activeFileRef.current) {
+                    editorComponentRef.current?.setValue(msg.code);
+                }
                 break;
                 
             case 'LANGUAGE_UPDATE':
-                setLanguage(msg.language);
+                setFiles(prev => ({
+                    ...prev,
+                    [msg.filename]: { ...prev[msg.filename], language: msg.language }
+                }));
+                break;
+                
+            case 'FILE_CREATE':
+                setFiles(prev => ({ ...prev, [msg.filename]: msg.file }));
+                break;
+                
+            case 'FILE_DELETE':
+                setFiles(prev => {
+                    const newFiles = { ...prev };
+                    delete newFiles[msg.filename];
+                    return newFiles;
+                });
+                if (activeFileRef.current === msg.filename) {
+                    setActiveFile('main.js');
+                    const mainContent = filesRef.current['main.js']?.content || '';
+                    editorComponentRef.current?.setValue(mainContent);
+                }
+                break;
+                
+            case 'FILE_RENAME':
+                setFiles(prev => {
+                    const newFiles = { ...prev };
+                    const file = newFiles[msg.oldName];
+                    delete newFiles[msg.oldName];
+                    if (file) newFiles[msg.newName] = file;
+                    return newFiles;
+                });
+                if (activeFileRef.current === msg.oldName) {
+                    setActiveFile(msg.newName);
+                }
                 break;
                 
             case 'CURSOR_UPDATE':
-                editorComponentRef.current?.updateRemoteCursor(msg.sessionId, msg.username, msg.position);
+                if (msg.filename === activeFileRef.current) {
+                    editorComponentRef.current?.updateRemoteCursor(msg.sessionId, msg.username, msg.position);
+                } else {
+                    editorComponentRef.current?.clearRemoteCursor(msg.sessionId);
+                }
                 break;
                 
             case 'RTC_SIGNAL':
@@ -105,6 +157,7 @@ export default function App() {
         const formatted = newList.map(p => ({
             sessionId: p.sessionId,
             username: p.username,
+            activeFile: p.activeFile,
             isSelf: p.sessionId === currentMySessionId
         }));
 
@@ -197,10 +250,18 @@ export default function App() {
         }
     };
 
+    const handleSendChatMessage = (msgText) => {
+        sendMessage({
+            type: 'CHAT',
+            message: msgText
+        });
+    };
+
     // Editor sync callbacks
     const handleCodeChange = (val) => {
         sendMessage({
             type: 'CODE_UPDATE',
+            filename: activeFileRef.current,
             code: val
         });
     };
@@ -208,6 +269,7 @@ export default function App() {
     const handleCursorChange = (pos) => {
         sendMessage({
             type: 'CURSOR_UPDATE',
+            filename: activeFileRef.current,
             position: {
                 lineNumber: pos.lineNumber,
                 column: pos.column
@@ -216,40 +278,75 @@ export default function App() {
     };
 
     const handleLanguageChange = (lang) => {
-        setLanguage(lang);
+        setFiles(prev => ({
+            ...prev,
+            [activeFileRef.current]: { ...prev[activeFileRef.current], language: lang }
+        }));
         sendMessage({
             type: 'LANGUAGE_UPDATE',
+            filename: activeFileRef.current,
             language: lang
         });
+    };
+    
+    const handleActiveFileChange = (filename) => {
+        setActiveFile(filename);
+        if (filesRef.current[filename]) {
+            editorComponentRef.current?.setValue(filesRef.current[filename].content);
+        }
+        sendMessage({
+            type: 'SWITCH_FILE',
+            filename: filename
+        });
+        editorComponentRef.current?.clearAllRemoteCursors();
+    };
+
+    const handleFileCreate = (filename, language = 'plaintext') => {
+        sendMessage({ type: 'FILE_CREATE', filename, language, content: '' });
+    };
+
+    const handleFileDelete = (filename) => {
+        sendMessage({ type: 'FILE_DELETE', filename });
+    };
+
+    const handleFileRename = (oldName, newName) => {
+        sendMessage({ type: 'FILE_RENAME', oldName, newName });
     };
 
     const handleUploadFile = (text, lang) => {
         editorComponentRef.current?.setValue(text);
-        setLanguage(lang);
+        setFiles(prev => ({
+            ...prev,
+            [activeFileRef.current]: { content: text, language: lang }
+        }));
         sendMessage({
             type: 'LANGUAGE_UPDATE',
+            filename: activeFileRef.current,
             language: lang
         });
         sendMessage({
             type: 'CODE_UPDATE',
+            filename: activeFileRef.current,
             code: text
         });
     };
 
     const handleDownloadFile = () => {
         const codeText = editorComponentRef.current?.getValue() || '';
+        const currentFile = filesRef.current[activeFileRef.current];
+        const lang = currentFile ? currentFile.language : 'plaintext';
         let ext = 'txt';
-        if (language === 'javascript') ext = 'js';
-        else if (language === 'typescript') ext = 'ts';
-        else if (language === 'html') ext = 'html';
-        else if (language === 'css') ext = 'css';
-        else if (language === 'json') ext = 'json';
-        else if (language === 'python') ext = 'py';
-        else if (language === 'java') ext = 'java';
-        else if (language === 'cpp') ext = 'cpp';
-        else if (language === 'markdown') ext = 'md';
+        if (lang === 'javascript') ext = 'js';
+        else if (lang === 'typescript') ext = 'ts';
+        else if (lang === 'html') ext = 'html';
+        else if (lang === 'css') ext = 'css';
+        else if (lang === 'json') ext = 'json';
+        else if (lang === 'python') ext = 'py';
+        else if (lang === 'java') ext = 'java';
+        else if (lang === 'cpp') ext = 'cpp';
+        else if (lang === 'markdown') ext = 'md';
         
-        const filename = `code_room_${roomCode}.${ext}`;
+        const filename = `code_room_${roomCode}_${activeFileRef.current.split('.')[0]}.${ext}`;
         const blob = new Blob([codeText], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         
@@ -487,7 +584,12 @@ export default function App() {
                     chatMessages={chatMessages}
                     unreadChatCount={unreadChatCount}
                     setUnreadChatCount={setUnreadChatCount}
-                    language={language}
+                    files={files}
+                    activeFile={activeFile}
+                    onActiveFileChange={handleActiveFileChange}
+                    onFileCreate={handleFileCreate}
+                    onFileDelete={handleFileDelete}
+                    onFileRename={handleFileRename}
                     onLanguageChange={handleLanguageChange}
                     onUploadFile={handleUploadFile}
                     onDownloadFile={handleDownloadFile}

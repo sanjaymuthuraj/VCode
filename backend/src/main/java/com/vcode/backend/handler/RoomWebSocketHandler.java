@@ -9,6 +9,9 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -60,6 +63,18 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
             case "RTC_SIGNAL":
                 handleRtcSignal(session, msgData);
                 break;
+            case "SWITCH_FILE":
+                handleSwitchFile(session, msgData);
+                break;
+            case "FILE_CREATE":
+                handleFileCreate(session, msgData);
+                break;
+            case "FILE_DELETE":
+                handleFileDelete(session, msgData);
+                break;
+            case "FILE_RENAME":
+                handleFileRename(session, msgData);
+                break;
             default:
                 System.out.println("Unknown websocket message type: " + type);
         }
@@ -87,8 +102,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Map<String, Object> stateMsg = new HashMap<>();
         stateMsg.put("type", "ROOM_STATE");
         stateMsg.put("roomCode", room.getRoomCode());
-        stateMsg.put("code", room.getCodeContent());
-        stateMsg.put("language", room.getLanguage());
+        stateMsg.put("files", room.getFiles());
         stateMsg.put("yourSessionId", session.getId());
 
         List<Map<String, String>> participantList = new ArrayList<>();
@@ -96,6 +110,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
             Map<String, String> pMap = new HashMap<>();
             pMap.put("sessionId", p.getSessionId());
             pMap.put("username", p.getUsername());
+            pMap.put("activeFile", p.getActiveFile());
             participantList.add(pMap);
         }
         stateMsg.put("participants", participantList);
@@ -136,11 +151,18 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
 
+        String filename = (String) msgData.get("filename");
         String code = (String) msgData.get("code");
-        room.setCodeContent(code);
+        
+        Room.FileInfo file = room.getFiles().get(filename);
+        if (file != null) {
+            file.setContent(code);
+            syncToDisk(roomCode, filename, code);
+        }
 
         Map<String, Object> updateMsg = new HashMap<>();
         updateMsg.put("type", "CODE_UPDATE");
+        updateMsg.put("filename", filename);
         updateMsg.put("code", code);
         updateMsg.put("senderId", session.getId());
 
@@ -155,11 +177,17 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         Room room = rooms.get(roomCode);
         if (room == null) return;
 
+        String filename = (String) msgData.get("filename");
         String language = (String) msgData.get("language");
-        room.setLanguage(language);
+        
+        Room.FileInfo file = room.getFiles().get(filename);
+        if (file != null) {
+            file.setLanguage(language);
+        }
 
         Map<String, Object> updateMsg = new HashMap<>();
         updateMsg.put("type", "LANGUAGE_UPDATE");
+        updateMsg.put("filename", filename);
         updateMsg.put("language", language);
 
         broadcastToRoom(roomCode, updateMsg, null);
@@ -187,10 +215,83 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         cursorMsg.put("type", "CURSOR_UPDATE");
         cursorMsg.put("sessionId", p.getSessionId());
         cursorMsg.put("username", p.getUsername());
+        cursorMsg.put("filename", p.getActiveFile());
         cursorMsg.put("position", pos);
 
         // Broadcast cursor to other room members
         broadcastToRoom(roomCode, cursorMsg, session.getId());
+    }
+    
+    private void handleSwitchFile(WebSocketSession session, Map<String, Object> msgData) throws IOException {
+        String roomCode = sessionToRoomCode.get(session.getId());
+        if (roomCode == null) return;
+        Room room = rooms.get(roomCode);
+        if (room == null) return;
+        Room.Participant p = room.getParticipants().get(session.getId());
+        if (p == null) return;
+        
+        String filename = (String) msgData.get("filename");
+        p.setActiveFile(filename);
+        broadcastUserList(roomCode);
+    }
+    
+    private void handleFileCreate(WebSocketSession session, Map<String, Object> msgData) throws IOException {
+        String roomCode = sessionToRoomCode.get(session.getId());
+        if (roomCode == null) return;
+        Room room = rooms.get(roomCode);
+        if (room == null) return;
+        
+        String filename = (String) msgData.get("filename");
+        String content = (String) msgData.get("content");
+        if (content == null) content = "";
+        String language = (String) msgData.get("language");
+        if (language == null) language = "plaintext";
+        
+        room.getFiles().putIfAbsent(filename, new Room.FileInfo(content, language));
+        syncToDisk(roomCode, filename, content);
+        
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("type", "FILE_CREATE");
+        msg.put("filename", filename);
+        msg.put("file", room.getFiles().get(filename));
+        broadcastToRoom(roomCode, msg, null);
+    }
+    
+    private void handleFileDelete(WebSocketSession session, Map<String, Object> msgData) throws IOException {
+        String roomCode = sessionToRoomCode.get(session.getId());
+        if (roomCode == null) return;
+        Room room = rooms.get(roomCode);
+        if (room == null) return;
+        
+        String filename = (String) msgData.get("filename");
+        if ("main.js".equals(filename)) return; // Don't delete root file
+        room.getFiles().remove(filename);
+        
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("type", "FILE_DELETE");
+        msg.put("filename", filename);
+        broadcastToRoom(roomCode, msg, null);
+    }
+    
+    private void handleFileRename(WebSocketSession session, Map<String, Object> msgData) throws IOException {
+        String roomCode = sessionToRoomCode.get(session.getId());
+        if (roomCode == null) return;
+        Room room = rooms.get(roomCode);
+        if (room == null) return;
+        
+        String oldName = (String) msgData.get("oldName");
+        String newName = (String) msgData.get("newName");
+        if ("main.js".equals(oldName)) return; // Don't rename root file
+        
+        Room.FileInfo file = room.getFiles().remove(oldName);
+        if (file != null) {
+            room.getFiles().put(newName, file);
+            Map<String, Object> msg = new HashMap<>();
+            msg.put("type", "FILE_RENAME");
+            msg.put("oldName", oldName);
+            msg.put("newName", newName);
+            broadcastToRoom(roomCode, msg, null);
+        }
     }
 
     private void handleRtcSignal(WebSocketSession session, Map<String, Object> msgData) throws IOException {
@@ -259,6 +360,16 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    private void syncToDisk(String roomCode, String filename, String content) {
+        try {
+            Path roomDir = Paths.get(System.getProperty("java.io.tmpdir"), "vcode_rooms", roomCode);
+            Files.createDirectories(roomDir);
+            Files.writeString(roomDir.resolve(filename), content != null ? content : "");
+        } catch (IOException e) {
+            System.err.println("Failed to sync file to disk: " + e.getMessage());
+        }
+    }
+
     private void broadcastUserList(String roomCode) throws IOException {
         Room room = rooms.get(roomCode);
         if (room == null) return;
@@ -268,6 +379,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
             Map<String, String> pMap = new HashMap<>();
             pMap.put("sessionId", p.getSessionId());
             pMap.put("username", p.getUsername());
+            pMap.put("activeFile", p.getActiveFile());
             participantList.add(pMap);
         }
 

@@ -12,7 +12,7 @@ self.MonacoEnvironment = {
     },
 };
 
-const EditorWorkspace = forwardRef(({ onCodeChange, onCursorChange, language }, ref) => {
+const EditorWorkspace = forwardRef(({ onCodeChange, onCursorChange, language, settings }, ref) => {
     const containerRef = useRef(null);
     const editorRef = useRef(null);
     const editorModelRef = useRef(null);
@@ -93,12 +93,13 @@ const EditorWorkspace = forwardRef(({ onCodeChange, onCursorChange, language }, 
         const editorInstance = monaco.editor.create(containerRef.current, {
             value: '// Start typing collaborative code here...\n',
             language: language || 'javascript',
-            theme: 'vs-dark',
+            theme: settings?.theme || 'vs-dark',
             automaticLayout: true,
+            wordWrap: settings?.wordWrap || 'off',
             fontFamily: "'JetBrains Mono', Consolas, monospace",
             fontSize: 14,
             tabSize: 4,
-            minimap: { enabled: false }
+            minimap: { enabled: settings?.minimap || false }
         });
 
         editorRef.current = editorInstance;
@@ -137,6 +138,17 @@ const EditorWorkspace = forwardRef(({ onCodeChange, onCursorChange, language }, 
             monaco.editor.setModelLanguage(editorModelRef.current, language);
         }
     }, [language]);
+
+    // Sync settings changes
+    useEffect(() => {
+        if (editorRef.current && settings) {
+            monaco.editor.setTheme(settings.theme);
+            editorRef.current.updateOptions({
+                wordWrap: settings.wordWrap,
+                minimap: { enabled: settings.minimap }
+            });
+        }
+    }, [settings]);
 
     return <div id="editor-container" ref={containerRef} style={{ height: '100%', width: '100%' }}></div>;
 });
