@@ -6,8 +6,9 @@ import HtmlWebpackPlugin from 'html-webpack-plugin';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default {
-  mode: 'development',
+export default (env, argv) => ({
+  mode: argv.mode || 'production',
+
   entry: {
     'renderer': './renderer.jsx',
     'editor.worker': 'monaco-editor/esm/vs/editor/editor.worker.js',
@@ -52,4 +53,5 @@ export default {
       'process.env.BACKEND_URL': JSON.stringify(process.env.BACKEND_URL || ''),
     }),
   ],
-};
+});
+
